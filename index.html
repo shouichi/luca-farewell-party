@@ -51,11 +51,14 @@ const HEAD = [
   "SSBBBBBBBBSS",
 ];
 const PPAL = {R:C.red, H:C.hair, S:C.skin, K:'#000', B:C.blue, Y:C.yel};
-const PS = {
-  stand: spr(HEAD.concat(["..BBB..BBB..", ".HHH....HHH.", "HHHH....HHHH"]), PPAL),
-  walk:  spr(HEAD.concat(["..BBBBBBB...", "..HHH.HHHH..", "...HH..HHH.."]), PPAL),
-  jump:  spr(HEAD.concat([".BBB....BBB.", "HHH......HHH", "HH........HH"]), PPAL),
-};
+const playerSprites = pal => ({
+  stand: spr(HEAD.concat(["..BBB..BBB..", ".HHH....HHH.", "HHHH....HHHH"]), pal),
+  walk:  spr(HEAD.concat(["..BBBBBBB...", "..HHH.HHHH..", "...HH..HHH.."]), pal),
+  jump:  spr(HEAD.concat([".BBB....BBB.", "HHH......HHH", "HH........HH"]), pal),
+});
+const PS = playerSprites(PPAL);
+const PS_FIRE = playerSprites({...PPAL, R: C.white, B: C.red});
+const PS_STAR = [PS, PS_FIRE, playerSprites({...PPAL, R: '#00a800', B: '#fc9838'}), playerSprites({...PPAL, R: '#000', B: '#c84c0c'})];
 const GOOMBA = spr([
   "......GGGG......",
   ".....GGGGGG.....",
@@ -74,7 +77,7 @@ const GOOMBA = spr([
   ".KKKKK....KKKKK.",
   "..KKK......KKK..",
 ], {G:C.br, W:C.skin, K:'#000'});
-const MUSH = spr([
+const MUSH_ROWS = [
   "......RRRR......",
   "....RRWWRRRR....",
   "...RWWWWRRRRR...",
@@ -91,7 +94,47 @@ const MUSH = spr([
   "....SSSSSSSS....",
   ".....SSSSSS.....",
   "................",
-], {R:C.red, W:C.white, S:C.skin, K:'#000'});
+];
+const MUSH = spr(MUSH_ROWS, {R:C.red, W:C.white, S:C.skin, K:'#000'});
+const ONEUP = spr(MUSH_ROWS, {R:'#00a800', W:C.white, S:C.skin, K:'#000'});
+const FLOWER = spr([
+  "....OOOOOOOO....",
+  "..OOYYYYYYYYOO..",
+  ".OYYWWWWWWWWYYO.",
+  "..OOYYYYYYYYOO..",
+  "....OOOOOOOO....",
+  ".......GG.......",
+  ".......GG.......",
+  "GG.....GG.....GG",
+  "GGG....GG....GGG",
+  ".GGG...GG...GGG.",
+  "..GGGG.GG.GGGG..",
+  "...GGGGGGGGGG...",
+  ".....GGGGGG.....",
+  ".......GG.......",
+  ".......GG.......",
+  "................",
+], {O:C.red, Y:'#fc9838', W:C.white, G:'#00a800'});
+const STAR_ROWS = [
+  ".......YY.......",
+  ".......YY.......",
+  "......YYYY......",
+  "......YYYY......",
+  "YYYYYYYYYYYYYYYY",
+  ".YYYYYYYYYYYYYY.",
+  "..YYYYKYYKYYYY..",
+  "...YYYKYYKYYY...",
+  "....YYYYYYYY....",
+  "....YYYYYYYY....",
+  "...YYYYYYYYYY...",
+  "...YYYYYYYYYY...",
+  "..YYYYY..YYYYY..",
+  "..YYYY....YYYY..",
+  ".YYY........YYY.",
+  ".Y............Y.",
+];
+const STARS = [C.yel, '#fc9838'].map(y => spr(STAR_ROWS, {Y: y, K: '#000'}));
+const ITEM_IMG = {mush: () => MUSH, oneup: () => ONEUP, flower: () => FLOWER, star: () => STARS[(frame >> 2) & 1]};
 
 // enemy.jpg の座標は EXIF の回転適用後(3072x4096)
 const FACES = [['enemy.jpg', 740, 740, 1340, 2120], ['enemy2.png', 45, 38, 185, 254]].map(([src, sx, sy, sw, sh]) => {
@@ -197,7 +240,85 @@ const sfx = {
   die: () => seq([494, 466, 440, 392, 330, 262, 196], 0.12),
   flag: () => seq([392, 523, 659, 784, 1047, 1319, 1568], 0.08),
   tick: () => tone(1760, 0.03, 'square', null, 0.03),
+  fire: () => tone(900, 0.08, 'square', 200, 0.05),
+  sprout: () => tone(523, 0.15, 'square', 1047),
 };
+
+// --- music ---
+const NOTE = {C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11};
+function parseVoice(str) {
+  const ev = [], tk = str.trim().split(/\s+/);
+  let pos = 0;
+  for (let i = 0; i < tk.length; i += 2) {
+    const n = tk[i], len = +tk[i + 1];
+    if (n !== 'r') {
+      const m = n.match(/^([A-G])([#b]?)(\d)$/);
+      const midi = 12 * (+m[3] + 1) + NOTE[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+      ev.push({at: pos, len, f: 440 * 2 ** ((midi - 69) / 12)});
+    }
+    pos += len;
+  }
+  return {ev, len: pos};
+}
+const track = (bpm, voices) => {
+  const v = voices.map(([str, type, vol]) => ({...parseVoice(str), type, vol}));
+  return {step: 60 / bpm / 4, len: Math.max(...v.map(x => x.len)), voices: v};
+};
+const rpt = (s, n) => (s + ' ').repeat(n);
+const TRACKS = {
+  0: track(150, [
+    ['C5 2 E5 2 G5 2 E5 2 A5 4 G5 4 F5 2 A5 2 C6 2 A5 2 G5 4 E5 4 D5 2 F5 2 A5 2 F5 2 G5 2 F5 2 E5 2 D5 2 C5 4 G4 4 C5 6 r 2', 'square', 0.03],
+    [rpt('C3 2 r 2 G3 2 r 2', 2) + 'F3 2 r 2 C4 2 r 2 C3 2 r 2 G3 2 r 2 D3 2 r 2 A3 2 r 2 G3 2 r 2 B3 2 r 2 C3 2 r 2 G3 2 r 2 C3 4 r 4', 'triangle', 0.09],
+  ]),
+  1: track(112, [
+    ['A4 1 r 1 C5 1 r 1 E5 1 r 1 A5 1 r 1 G5 1 r 3 E5 1 r 3 F5 1 r 1 E5 1 r 1 D5 1 r 1 C5 1 r 1 B4 1 r 3 G#4 1 r 3 ' +
+     'A4 1 r 1 C5 1 r 1 E5 1 r 1 A5 1 r 1 C6 1 r 3 B5 1 r 3 A5 1 r 1 E5 1 r 1 C5 1 r 1 B4 1 r 1 A4 2 r 6', 'square', 0.025],
+    [['A2', 'A2', 'E2', 'E2', 'D2', 'D2', 'E2', 'E2', 'A2', 'A2', 'G2', 'G2', 'F2', 'E2', 'A2', 'A2'].map(n => n + ' 2 r 2').join(' '), 'triangle', 0.1],
+  ]),
+  2: track(132, [
+    ['E5 6 D5 3 C5 3 G5 6 E5 6 F5 6 E5 3 D5 3 C5 12 A5 6 G5 3 F5 3 E5 6 C5 6 D5 6 E5 3 D5 3 G4 12', 'triangle', 0.08],
+    [rpt('C3 4 G3 4 E3 4', 2) + rpt('F3 4 C4 4 A3 4', 1) + rpt('C3 4 G3 4 E3 4', 1) + rpt('F3 4 C4 4 A3 4', 1) + rpt('C3 4 G3 4 E3 4', 1) + rpt('G2 4 D3 4 B2 4', 2), 'square', 0.018],
+  ]),
+  3: track(128, [
+    ['E5 2 r 2 E5 2 G5 2 F#5 2 E5 2 D5 2 r 2 E5 2 r 2 B4 2 D5 2 E5 4 r 4 G5 2 r 2 G5 2 A5 2 B5 2 A5 2 G5 2 F#5 2 E5 6 D5 2 E5 4 r 4', 'square', 0.025],
+    [rpt('E2 2 E3 2', 8) + rpt('C2 2 C3 2', 4) + rpt('B1 2 B2 2', 4), 'triangle', 0.1],
+  ]),
+  4: track(168, [
+    ['D5 2 F5 2 A5 2 D6 2 C6 2 A5 2 F5 2 A5 2 Bb5 4 A5 2 G5 2 A5 8 G5 2 Bb5 2 D6 2 Bb5 2 A5 2 F5 2 E5 2 F5 2 D5 4 E5 4 C#5 8', 'square', 0.03],
+    [rpt('D2 2 D3 2', 4) + rpt('Bb1 2 Bb2 2', 2) + rpt('A1 2 A2 2', 2) + rpt('G1 2 G2 2', 4) + rpt('A1 2 A2 2', 4), 'triangle', 0.1],
+  ]),
+  star: track(180, [
+    [rpt('C5 1 E5 1 G5 1 C6 1', 2) + rpt('D5 1 F5 1 A5 1 D6 1', 2), 'square', 0.025],
+    [rpt('C3 2 C4 2', 2) + rpt('D3 2 D4 2', 2), 'triangle', 0.1],
+  ]),
+};
+const music = {name: null, gain: null, pos: 0, t: 0};
+function setMusic(name) {
+  music.name = name;
+  if (music.gain) { music.gain.disconnect(); music.gain = null; }
+  if (name === null) return;
+  music.gain = AC.createGain(); music.gain.connect(AC.destination);
+  music.pos = 0; music.t = AC.currentTime + 0.05;
+}
+function playNote(v, e, t, step) {
+  const o = AC.createOscillator(), g = AC.createGain(), d = e.len * step * 0.9;
+  o.type = v.type; o.frequency.value = e.f;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v.vol, t + 0.01);
+  g.gain.setValueAtTime(v.vol, t + Math.max(0.01, d - 0.03)); g.gain.linearRampToValueAtTime(0, t + d);
+  o.connect(g).connect(music.gain); o.start(t); o.stop(t + d + 0.01);
+}
+function syncMusic() {
+  if (!AC) return;
+  const want = state === 'play' && !paused ? (P.star > 0 ? 'star' : stage) : null;
+  if (want !== music.name) setMusic(want);
+  if (!music.gain) return;
+  const tr = TRACKS[music.name];
+  if (music.t < AC.currentTime) music.t = AC.currentTime + 0.02;
+  while (music.t < AC.currentTime + 0.2) {
+    for (const v of tr.voices) { const p = music.pos % v.len; for (const e of v.ev) if (e.at === p) playNote(v, e, music.t, tr.step); }
+    music.pos = (music.pos + 1) % tr.len; music.t += tr.step;
+  }
+}
 
 // --- input ---
 const keys = {left: 0, right: 0, jump: 0, run: 0, start: 0};
@@ -223,9 +344,9 @@ function fit() {
 addEventListener('resize', fit); fit();
 
 // --- world ---
-let map, enemies, items, parts, pops, coinFx, bumps, P, cam;
+let map, enemies, items, parts, pops, coinFx, bumps, fires, multi, P, cam;
 let score = 0, coins = 0, lives = 3, time = 400, state = 'title', stateT = 0, flagY = 0, frame = 0, combo = 0;
-let prevJump = 0, prevStart = 0, stage = 0;
+let prevJump = 0, prevStart = 0, prevRun = 0, stage = 0;
 
 function buildLevel() {
   map = Array.from({length: ROWS}, () => new Array(COLS).fill(0));
@@ -309,6 +430,14 @@ function buildLevel() {
       [126, 12], [136, 12], [138, 7], [140, 12], [146, 12], [147.5, 12], [162, 12], [163.5, 12], [168, 12], [170, 12],
       [175, 12], [176.5, 12]];
   }
+  const extras = [
+    [[101, 9, 12], [94, 9, 13], [65, 9, 14]],
+    [[135, 5, 12], [111, 9, 13], [61, 8, 14]],
+    [[98, 6, 12], [172, 6, 14]],
+    [[75, 6, 12], [171, 9, 13], [52, 8, 14]],
+    [[104, 9, 12], [170, 9, 13], [137, 8, 14]],
+  ][stage];
+  for (const [x, y, t] of extras) S(x, y, t);
   S(FLAGX, 12, 6);
 
   enemies = foes
@@ -318,8 +447,8 @@ function buildLevel() {
 function resetLevel() {
   theme = THEMES[stage]; Object.assign(TILE, theme.tiles);
   buildLevel();
-  items = []; parts = []; pops = []; coinFx = []; bumps = [];
-  P = {x: 3 * T, y: 12 * T, w: 12, h: 16, vx: 0, vy: 0, big: false, face: 1, onGround: false, inv: 0, anim: 0, jumping: false, buf: 0, hidden: false};
+  items = []; parts = []; pops = []; coinFx = []; bumps = []; fires = []; multi = {};
+  P = {x: 3 * T, y: 12 * T, w: 12, h: 16, vx: 0, vy: 0, big: false, face: 1, onGround: false, inv: 0, anim: 0, jumping: false, buf: 0, hidden: false, fire: false, star: 0};
   cam = 0; time = 400; flagY = 3 * T + 4; stateT = 0; combo = 0;
 }
 function newGame() { score = 0; coins = 0; lives = 3; stage = 0; resetLevel(); state = 'play'; }
@@ -327,7 +456,7 @@ function newGame() { score = 0; coins = 0; lives = 3; stage = 0; resetLevel(); s
 function solid(tx, ty) {
   if (tx < 0 || tx >= COLS) return true;
   if (ty < 0 || ty >= ROWS) return false;
-  const t = map[ty][tx]; return t >= 1 && t <= 10;
+  const t = map[ty][tx]; return t !== 0 && t !== 11;
 }
 function collide(e, onHead) {
   e.hitX = false;
@@ -364,10 +493,15 @@ function addCoin() {
 
 function bump(tx, ty) {
   const t = map[ty][tx];
-  if (t === 3 || t === 4) {
+  const coinOut = () => { coinFx.push({x: tx * T, y: (ty - 1) * T, vy: -5, t: 0}); addCoin(); };
+  if (t === 3 || t === 4 || t === 12 || t === 14) {
     map[ty][tx] = 5; bumps.push({tx, ty, t: 0});
-    if (t === 3) { coinFx.push({x: tx * T, y: (ty - 1) * T, vy: -5, t: 0}); addCoin(); }
-    else { items.push({x: tx * T, y: ty * T, w: 16, h: 16, vx: 1, vy: 0, rise: 16}); tone(523, 0.15, 'square', 1047); }
+    if (t === 3) coinOut();
+    else spawnItem(t === 4 ? (P.big ? 'flower' : 'mush') : t === 12 ? 'star' : 'oneup', tx, ty);
+  } else if (t === 13) {
+    bumps.push({tx, ty, t: 0}); coinOut();
+    const k = tx + ',' + ty, m = multi[k] || (multi[k] = {n: 0, t: frame});
+    if (++m.n >= 10 || frame - m.t > 300) map[ty][tx] = 5;
   } else if (t === 2) {
     if (P.big) {
       map[ty][tx] = 0; addScore(50); sfx.brk();
@@ -376,25 +510,33 @@ function bump(tx, ty) {
     } else { bumps.push({tx, ty, t: 0}); sfx.bump(); }
   } else sfx.bump();
   for (const e of enemies)
-    if (e.state === 'walk' && e.active && Math.abs(e.y + e.h - ty * T) < 3 && e.x + e.w > tx * T && e.x < (tx + 1) * T) {
-      e.state = 'flip'; e.vy = -4; e.vx = e.x > P.x ? 1 : -1; addScore(100, e.x, e.y); sfx.stomp();
-    }
+    if (e.state === 'walk' && e.active && Math.abs(e.y + e.h - ty * T) < 3 && e.x + e.w > tx * T && e.x < (tx + 1) * T) kill(e);
   for (const m of items)
     if (!m.rise && Math.abs(m.y + m.h - ty * T) < 3 && m.x + m.w > tx * T && m.x < (tx + 1) * T) m.vy = -4;
 }
 
+function spawnItem(kind, tx, ty) {
+  items.push({kind, x: tx * T, y: ty * T, w: 16, h: 16, vx: kind === 'flower' ? 0 : kind === 'star' ? 1.5 : 1, vy: 0, rise: 16});
+  sfx.sprout();
+}
+function kill(e) {
+  e.state = 'flip'; e.vy = -4; e.vx = e.x > P.x ? 1 : -1; addScore(100, e.x, e.y); sfx.stomp();
+}
+function grow() { if (!P.big) { P.big = true; P.y -= 16; P.h = 32; } }
+
 function hurt() {
-  if (P.big) { P.big = false; P.y += 16; P.h = 16; P.inv = 120; sfx.hurt(); }
+  if (P.big) { P.big = false; P.fire = false; P.y += 16; P.h = 16; P.inv = 120; sfx.hurt(); }
   else die();
 }
 function die() {
   if (state !== 'play') return;
   state = 'dying'; stateT = 0;
   if (P.big) { P.big = false; P.y += 16; P.h = 16; }
+  P.fire = false; P.star = 0;
   P.vy = P.y > VH ? 0 : -7; sfx.die();
 }
 
-function updatePlayer(jp) {
+function updatePlayer(jp, rp) {
   const p = P, run = keys.run, max = run ? 2.6 : 1.6, dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   if (dir) {
     p.face = dir;
@@ -414,6 +556,11 @@ function updatePlayer(jp) {
   if (p.onGround) combo = 0;
   p.anim += Math.abs(p.vx) * 0.12;
   if (p.inv > 0) p.inv--;
+  if (p.star > 0) p.star--;
+  if (p.fire && rp && fires.length < 2) {
+    fires.push({x: p.face > 0 ? p.x + p.w : p.x - 8, y: p.y + 8, w: 8, h: 8, vx: p.face * 3.5, vy: 1});
+    sfx.fire();
+  }
 
   for (let ty = Math.floor(p.y / T); ty <= Math.floor((p.y + p.h - 0.01) / T); ty++)
     for (let tx = Math.floor(p.x / T); tx <= Math.floor((p.x + p.w - 0.01) / T); tx++)
@@ -438,13 +585,14 @@ function updateEnemies() {
     e.anim++;
     if (e.y > VH || e.x + e.w < cam - 32) { e.dead = true; continue; }
     if (state === 'play' && overlap(P, e)) {
-      if (P.vy > 0 && P.y + P.h - P.vy <= e.y + 6) {
+      if (P.star <= 0 && P.vy > 0 && P.y + P.h - P.vy <= e.y + 6) {
         e.state = 'squish'; e.t = 30;
         P.vy = keys.jump ? -6 : -4; P.jumping = !!keys.jump;
         combo++;
         addScore([100, 200, 400, 500, 800, 1000, 2000, 4000, 5000, 8000][Math.min(combo - 1, 9)], e.x, e.y);
         sfx.stomp();
-      } else if (P.inv <= 0) hurt();
+      } else if (P.star > 0) kill(e);
+      else if (P.inv <= 0) hurt();
     }
   }
   const w = enemies.filter(e => e.active && e.state === 'walk');
@@ -461,18 +609,35 @@ function updateEnemies() {
 function updateItems() {
   for (const m of items) {
     if (m.rise > 0) { m.y -= 0.5; m.rise -= 0.5; }
-    else {
+    else if (m.kind !== 'flower') {
       m.vy = Math.min(m.vy + 0.4, 6);
       const vx = m.vx; collide(m); if (m.hitX) m.vx = -vx;
+      if (m.kind === 'star' && m.onGround) m.vy = -5;
       if (m.y > VH) m.dead = true;
     }
     if (state === 'play' && overlap(P, m)) {
       m.dead = true;
-      if (!P.big) { P.big = true; P.y -= 16; P.h = 32; }
+      if (m.kind === 'oneup') { lives++; pop(m.x, m.y, '1UP'); sfx.oneup(); continue; }
+      if (m.kind === 'mush') grow();
+      else if (m.kind === 'flower') { if (P.big) P.fire = true; grow(); }
+      else P.star = 600;
       addScore(1000, m.x, m.y); sfx.up();
     }
   }
   items = items.filter(m => !m.dead);
+}
+
+function updateFires() {
+  for (const f of fires) {
+    f.vy = Math.min(f.vy + 0.4, 6);
+    collide(f);
+    if (f.onGround) f.vy = -3.5;
+    if (f.hitX) { f.dead = true; parts.push({x: f.x, y: f.y, vx: 0, vy: -1, fire: true}); }
+    if (f.y > VH || f.x < cam - 16 || f.x > cam + VW + 16) f.dead = true;
+    for (const e of enemies)
+      if (!f.dead && e.active && e.state === 'walk' && overlap(f, e)) { kill(e); f.dead = true; }
+  }
+  fires = fires.filter(f => !f.dead);
 }
 
 function updateFx() {
@@ -488,15 +653,15 @@ function updateFx() {
 
 function update() {
   frame++;
-  const jp = keys.jump && !prevJump, sp = keys.start && !prevStart;
-  prevJump = keys.jump; prevStart = keys.start;
+  const jp = keys.jump && !prevJump, sp = keys.start && !prevStart, rp = keys.run && !prevRun;
+  prevJump = keys.jump; prevStart = keys.start; prevRun = keys.run;
 
   if (state === 'title') { if (sp || jp) newGame(); return; }
   if (state === 'gameover') { if (++stateT > 60 && (sp || jp)) { state = 'title'; resetLevel(); } return; }
 
   if (state === 'play') {
     if (frame % 24 === 0 && --time <= 0) { time = 0; die(); }
-    if (state === 'play') updatePlayer(jp);
+    if (state === 'play') updatePlayer(jp, rp);
   } else if (state === 'dying') {
     stateT++;
     if (stateT > 30) { P.vy += 0.35; P.y += P.vy; }
@@ -524,7 +689,7 @@ function update() {
     return;
   }
 
-  if (state !== 'dying') { updateEnemies(); updateItems(); }
+  if (state !== 'dying') { updateEnemies(); updateItems(); updateFires(); }
   updateFx();
   cam = Math.max(cam, Math.min(P.x - 140, COLS * T - VW));
 }
@@ -591,7 +756,8 @@ function drawPlayer() {
   else if (state === 'flag' && P.y + P.h < 12 * T) f = 'stand';
   else if (!P.onGround) f = 'jump';
   else if (Math.abs(P.vx) > 0.2) f = Math.floor(P.anim) % 2 ? 'walk' : 'stand';
-  const img = PS[f], x = Math.round(P.x), y = Math.round(P.y);
+  const set = P.star > 0 ? PS_STAR[(frame >> 2) & 3] : P.fire ? PS_FIRE : PS;
+  const img = set[f], x = Math.round(P.x), y = Math.round(P.y);
   ctx.save();
   if (P.face < 0) { ctx.translate(x + 12, y); ctx.scale(-1, 1); } else ctx.translate(x, y);
   if (P.big) { ctx.drawImage(img, 0, 0, 12, 8, 0, 0, 12, 8); ctx.drawImage(img, 0, 8, 12, 8, 0, 8, 12, 24); }
@@ -633,20 +799,24 @@ function render() {
   ctx.fillStyle = theme.sky; ctx.fillRect(0, 0, VW, VH);
   ctx.save(); ctx.translate(-Math.round(cam), 0);
   drawBg(); drawCastle(); drawFlag();
-  for (const m of items) ctx.drawImage(MUSH, Math.round(m.x), Math.round(m.y));
+  for (const m of items) ctx.drawImage(ITEM_IMG[m.kind](), Math.round(m.x), Math.round(m.y));
   const c0 = Math.floor(cam / T), c1 = Math.min(COLS - 1, c0 + VW / T + 1);
   for (let y = 0; y < ROWS; y++) for (let x = c0; x <= c1; x++) {
     const t = map[y][x]; if (!t) continue;
     if (t === 11) { drawCoin(x * T, y * T); continue; }
     const b = bumps.find(b => b.tx === x && b.ty === y);
     const oy = b ? -Math.round(Math.sin(b.t / 16 * Math.PI) * 5) : 0;
-    const img = (t === 3 || t === 4) ? QT[[0, 0, 0, 1, 2, 1][Math.floor(frame / 8) % 6]] : TILE[t];
+    const img = (t === 3 || t === 4 || t === 14) ? QT[[0, 0, 0, 1, 2, 1][Math.floor(frame / 8) % 6]] : (t === 12 || t === 13) ? TILE[2] : TILE[t];
     ctx.drawImage(img, x * T, y * T + oy);
   }
   for (const c of coinFx) drawCoin(c.x, c.y);
+  for (const f of fires) {
+    ctx.fillStyle = '#fc9838'; ctx.beginPath(); ctx.arc(f.x + 4, f.y + 4, 4, 0, 7); ctx.fill();
+    ctx.fillStyle = C.yel; ctx.fillRect(Math.round(f.x) + 2 + ((frame >> 1) & 1) * 2, Math.round(f.y) + 2, 2, 2);
+  }
   for (const e of enemies) if (e.active) drawEnemy(e);
   drawPlayer();
-  ctx.fillStyle = C.br; for (const p of parts) ctx.fillRect(Math.round(p.x), Math.round(p.y), 7, 7);
+  for (const p of parts) { ctx.fillStyle = p.fire ? '#fc9838' : theme.br; ctx.fillRect(Math.round(p.x), Math.round(p.y), 7, 7); }
   for (const p of pops) txt(p.s, p.x, p.y, 'left', '#fff', 6);
   ctx.restore();
 
@@ -662,7 +832,7 @@ function render() {
     txt('BROS', VW / 2, 84, 'center', '#fcd800', 16);
     txt('MOVE  <- ->', VW / 2, 112, 'center');
     txt('JUMP  SPACE/Z', VW / 2, 124, 'center');
-    txt('RUN   SHIFT/X', VW / 2, 136, 'center');
+    txt('RUN/FIRE  SHIFT/X', VW / 2, 136, 'center');
     if ((frame >> 5) & 1) txt('PRESS ENTER', VW / 2, 154, 'center', '#fcd800');
   } else if (state === 'clear') {
     txt('COURSE CLEAR!', VW / 2, 80, 'center', '#fff', 12);
@@ -682,6 +852,7 @@ function loop(ts) {
   acc += Math.min((ts - last) / 1000, 0.1); last = ts;
   while (acc >= 1 / 60) { if (!paused) update(); else frame++; acc -= 1 / 60; }
   render();
+  syncMusic();
   requestAnimationFrame(loop);
 }
 resetLevel();
